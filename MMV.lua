@@ -1011,6 +1011,10 @@ local function getclosestplayer()
     return closestpart
 end
 
+-- Función para interceptar el envío del cuchillo SIN modificar FireServer directamente
+local originalKnifeThrown = nil
+local hookedKnifeEvent = nil
+
 local function hookKnifeThrown()
     local character = LocalPlayer.Character
     if not character then return end
@@ -1023,12 +1027,19 @@ local function hookKnifeThrown()
     
     local knifeThrownEvent = knifeEvents:FindFirstChild("KnifeThrown")
     if not knifeThrownEvent then return end
-    
+
+    -- Evitar duplicar el hook
+    if hookedKnifeEvent then return end
+
+    -- Guardamos la función original si no la tenemos
     if not originalKnifeThrown then
-        originalKnifeThrown = knifeThrownEvent.FireServer
+        originalKnifeThrown = function(cframe, ...)
+            knifeThrownEvent:FireServer(cframe, ...)
+        end
     end
-    
-    knifeThrownEvent.FireServer = function(self, ...)
+
+    -- Usamos el método correcto: escuchamos y reenviamos
+    hookedKnifeEvent = knifeThrownEvent.OnClientEvent:Connect(function(...)
         local args = {...}
         
         if closestKnifePart and knifeEquipped and Config.KnifeSilentAim then
@@ -1036,18 +1047,19 @@ local function hookKnifeThrown()
             local characterPos = character:GetPivot().Position
             
             local direction = (targetPos - characterPos).Unit
-            
             local newCFrame = CFrame.new(characterPos, characterPos + direction)
             
-            if #args >= 1 then
-                args[1] = newCFrame
-            end
+            -- Enviamos la posición modificada
+            originalKnifeThrown(newCFrame, select(2, ...))
+            return
         end
         
-        return originalKnifeThrown(self, unpack(args))
-    end
+        -- Comportamiento normal
+        originalKnifeThrown(...)
+    end)
 end
 
+-- Hook de __namecall (se mantiene igual, no tiene errores)
 local oldnamecall
 oldnamecall = hookmetamethod(game, "__namecall", function(...)
     local method = getnamecallmethod()
@@ -1056,7 +1068,6 @@ oldnamecall = hookmetamethod(game, "__namecall", function(...)
 
     if self == workspace and not checkcaller() and method == "Raycast" and Config.GunSilentAim then
         local hitpart = closesthitpart
-        
         if hitpart then
             local origin = arguments[2]
             local direction = getdirection(origin, hitpart.Position) * 1000
@@ -1067,7 +1078,6 @@ oldnamecall = hookmetamethod(game, "__namecall", function(...)
     
     if self == workspace and not checkcaller() and method == "Raycast" and Config.KnifeSilentAim and knifeEquipped then
         local hitpart = closestKnifePart
-        
         if hitpart then
             local origin = arguments[2]
             local direction = getdirection(origin, hitpart.Position) * 1000
